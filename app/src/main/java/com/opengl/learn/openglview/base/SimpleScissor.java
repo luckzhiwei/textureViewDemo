@@ -1,35 +1,28 @@
 package com.opengl.learn.openglview.base;
 
-import android.content.Context;
 import android.opengl.GLES20;
-import android.opengl.GLES30;
-import android.util.Log;
-
 import com.opengl.learn.openglview.IGLESRenderer;
-
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 
-public class SimpleTriangle extends IGLESRenderer {
+public class SimpleScissor extends IGLESRenderer {
 
-    private static final String TAG = "SimpleTriangle";
-    private Context mContext;
+    private static final String TAG = "SimpleScissor";
     private FloatBuffer mVertices;
     private final float[] mVerticesData =
             {-0.5f, 0.5f, 0.0f, -0.5f, -0.5f, 0.0f, 0.0f, -0.5f, 0.0f};
 
     private int[] size = {60, 60};
-    private int velocity = 10;
+    private int velocity = 20;
     private int[] position;
 
 
-    public SimpleTriangle(Context context) {
-        init(context);
+    public SimpleScissor() {
+        this.init();
     }
 
-    private void init(Context context) {
-        this.mContext = context;
+    private void init() {
         this.preparemVertices();
     }
 
@@ -90,6 +83,5 @@ public class SimpleTriangle extends IGLESRenderer {
 
     @Override
     public void onDestroy() {
-        // do something
     }
 }

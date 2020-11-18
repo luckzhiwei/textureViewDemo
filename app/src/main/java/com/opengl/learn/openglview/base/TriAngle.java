@@ -13,7 +13,7 @@ import java.nio.FloatBuffer;
 
 public class TriAngle extends IGLESRenderer {
 
-    private static final String TAG = "SimpleTriangle";
+    private static final String TAG = "SimpleScissor";
     private Context mContext;
     private int mProgramObject;
     private FloatBuffer mVertices;

@@ -2,192 +2,169 @@ package com.opengl.learn.openglview;
 
 import android.content.Context;
 import android.graphics.SurfaceTexture;
+import android.os.Build;
+import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.Looper;
-import android.os.SystemClock;
 import android.util.AttributeSet;
-import android.util.Log;
-import android.view.Choreographer;
 import android.view.TextureView;
 
-import com.opengl.learn.openglview.base.SimpleTriangle;
+import com.opengl.learn.openglview.util.Util;
 
-import java.text.SimpleDateFormat;
-import java.util.Date;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 
 public class GLESView extends TextureView implements TextureView.SurfaceTextureListener {
 
-    private GLESThread mThread;
-    private Context context;
-    private IGLESRenderer renderer;
-    public AtomicBoolean flag = new AtomicBoolean(false);
-    //    public volatile boolean flag = false;
-    public Object lock = new Object();
-    //    public volatile boolean flag;
-    private volatile int callCount = 0;
-    private int waitCount = 0;
-    volatile boolean hasPendingFrame = false;
+  private GLESRender mRender;
+  private HandlerThread mRenderThread;
+  private android.os.Handler mMainThreadHandler;
+  private android.os.Handler mRenderThreadHandler;
+  private Field fieldUpdateListener = null;
+  private Field fieldUpdateLayer = null;
+  private final String KEY_UPDATE_LAYER = "mUpdateLayer";
+  private final String KEY_UPDATE_LISTENER = "mUpdateListener";
 
-    private long lastTime = 0;
-    private volatile int swapIndex = 0;
+  private SurfaceTexture.OnFrameAvailableListener canvasFrameAvaiableListener;
+  private volatile boolean hasBufferNeedShow = true;
 
-    private HandlerThread thread;
-    private android.os.Handler handler;
-    private long currentTime = SystemClock.currentThreadTimeMillis();
-    private long currentTime2 = SystemClock.currentThreadTimeMillis();
-    private AtomicInteger index = new AtomicInteger(0);
+  public GLESView(Context context) {
+    super(context);
+    init();
+  }
 
-    private long frames = 0;
+  public GLESView(Context context, AttributeSet attrs) {
+    super(context, attrs);
+    init();
+  }
 
-    public GLESView(Context context) {
-        super(context);
-        init(context);
+  private synchronized void setHasBufferNeedShow(boolean value) {
+    this.hasBufferNeedShow = value;
+  }
+
+  private Runnable renderNextFrameCallback = new Runnable() {
+    @Override public void run() {
+      mRenderThreadHandler.post(new Runnable() {
+        @Override
+        public void run() {
+          mRender.drawFrame();
+          mRender.swapBuffer();
+        }
+      });
     }
+  };
 
-    public GLESView(Context context, AttributeSet attrs) {
-        super(context, attrs);
-        init(context);
+  private void init() {
+    this.setSurfaceTextureListener(this);
+    this.mRenderThread = new HandlerThread("render-Thread");
+    this.mRenderThread.start();
+    this.mRenderThreadHandler = new android.os.Handler(mRenderThread.getLooper());
+    this.mMainThreadHandler = new Handler(Looper.getMainLooper());
+    initReflectGetField();
+    this.canvasFrameAvaiableListener = new SurfaceTexture.OnFrameAvailableListener() {
+      @Override
+      public void onFrameAvailable(SurfaceTexture surfaceTexture) {
+        setHasBufferNeedShow(true);
+        trySetUpdateLayerValue(true);
+        invalidate();
+      }
+    };
+    tryReplaceFrameUpdateListener();
+  }
+
+  @Override
+  public void onSurfaceTextureAvailable(SurfaceTexture surface, final int width, final int height) {
+    this.mRender = new GLESRender(surface, width, height);
+    mRenderThreadHandler.post(new Runnable() {
+      @Override
+      public void run() {
+        try {
+          mRender.initEGLContext();
+          mRender.onSurfaceCreated();
+          mRender.drawFrame();
+          mRender.swapBuffer();
+        } catch (Exception e) {
+          e.printStackTrace();
+        }
+      }
+    });
+  }
+
+  @Override public void onSurfaceTextureSizeChanged(SurfaceTexture surface, int width, int height) {
+
+  }
+
+  @Override public boolean onSurfaceTextureDestroyed(SurfaceTexture surface) {
+    return false;
+  }
+
+  private void tryReplaceFrameUpdateListener() {
+    if (fieldUpdateListener == null) {
+    } else {
+      try {
+        fieldUpdateListener.setAccessible(true);
+        fieldUpdateListener.set(this, canvasFrameAvaiableListener);
+      } catch (Exception ex) {
+      }
     }
+  }
 
-    private void init(Context ctx) {
-        this.context = ctx;
-        this.setSurfaceTextureListener(this);
-        this.thread = new HandlerThread("");
-        this.thread.start();
-        this.handler = new android.os.Handler(this.thread.getLooper());
-//        this.handler = new android.os.Handler(Looper.getMainLooper());
+  private void trySetUpdateLayerValue(boolean value) {
+    if (fieldUpdateLayer == null) {
+
+    } else {
+      try {
+        fieldUpdateLayer.setAccessible(true);
+        fieldUpdateLayer.set(this, value);
+      } catch (Exception ex) {
+
+      }
+    }
+  }
+
+  @Override
+  public void onSurfaceTextureUpdated(SurfaceTexture surface) {
+    if (!hasBufferNeedShow) {
+      renderNextFrameCallback.run();
+    } else {
+      mMainThreadHandler.post(renderNextFrameCallback);
+    }
+    setHasBufferNeedShow(false);
+  }
+
+  private void initReflectGetField() {
+    try {
+      if (fieldUpdateListener == null) {
+        fieldUpdateListener = queryFieldByName(KEY_UPDATE_LISTENER);
+      }
+      if (fieldUpdateLayer == null) {
+        fieldUpdateLayer = queryFieldByName(KEY_UPDATE_LAYER);
+      }
+    } catch (Exception e) {
 
     }
+  }
 
-    @Override
-    public void onSurfaceTextureAvailable(SurfaceTexture surface, int width, int height) {
-        renderer = new SimpleTriangle(this.context);
-        renderer.setWidth(width);
-        renderer.setHeight(height);
-        currentTime = SystemClock.currentThreadTimeMillis();
-        frames = 0;
+  private Field queryFieldByName(String fieldName) {
+    Field result = null;
+    try {
+      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+        result = Util.reflectGetFieldByName(TextureView.class.getDeclaredFields(), fieldName);
+      } else {
+        Method metaGetDeclaredMethod = Class.class.getDeclaredMethod("getDeclaredFields");
+        // 系统类通过反射使用隐藏 API，检查直接通过。
+        Object fields = metaGetDeclaredMethod.invoke(TextureView.class);
+        if (fields instanceof Field[]) {
+          Field[] fieldsArray = (Field[]) fields;
+          Field f = Util.reflectGetFieldByName(fieldsArray, fieldName);
+          if (f != null) {
+            result = f;
+          }
+        }
+      }
+    } catch (Exception e) {
 
-//        this.mThread = new GLESThread(surface, renderer, this);
-//        this.mThread.run();
-        handler.post(new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    mThread.initEGLContext();
-                    renderer.onSurfaceCreated();
-                    renderer.onDrawFrame();
-                    mThread.swapBuffer();
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
-            }
-        });
-
-//        Choreographer.FrameCallback frameCallback = new Choreographer.FrameCallback() {
-//            @Override
-//            public void doFrame(long l) {
-//                handler.post(new Runnable() {
-//                    @Override
-//                    public void run() {
-//                        try {
-//                            synchronized (GLESView.class) {
-//                                if (frames == 0) {
-//                                    currentTime = System.currentTimeMillis();
-//                                }
-//
-//                                frames++;
-//
-//
-//                                Log.e("Alan", "VSYNC call in");
-//                                if (!hasPendingFrame) {
-//                                    Log.e("Alan", "VYSNC Direct render");
-//                                    renderer.onDrawFrame();
-//                                    mThread.swapBuffer();
-//
-//                                    renderer.onDrawFrame();
-//                                    mThread.swapBuffer();
-////                                    hasPendingFrame = true;
-//                                } else {
-//                                    Log.e("Alan", "VYSNC hasPendingFrame is " + hasPendingFrame);
-//                                    callback = new Runnable() {
-//                                        @Override
-//                                        public void run() {
-//                                            renderer.onDrawFrame();
-//                                            mThread.swapBuffer();
-//                                            hasPendingFrame = true;
-//                                        }
-//                                    };
-//                                }
-//                            }
-//                        } catch (Exception e) {
-//                            e.printStackTrace();
-//                        }
-//                    }
-//                });
-////                Choreographer.getInstance().postFrameCallback(this);
-//            }
-//        };
-//
-//        Choreographer.getInstance().postFrameCallback(frameCallback);
     }
-
-    @Override
-    public boolean onSurfaceTextureDestroyed(SurfaceTexture surface) {
-        return false;
-    }
-
-    @Override
-    public void onSurfaceTextureSizeChanged(SurfaceTexture surface, final int width,
-                                            final int height) {
-        mThread.onSurfaceChanged(width, height);
-    }
-
-
-    @Override
-    public void onSurfaceTextureUpdated(SurfaceTexture surface) {
-//        Log.e("Alan", "onSurfaceTextureUpdated " + getCurrentTimeStamp());
-        handler.post(new Runnable() {
-            @Override
-            public void run() {
-                renderer.onDrawFrame();
-                mThread.swapBuffer();
-            }
-        });
-//        synchronized (GLESView.class) {
-//            post(new Runnable() {
-//                @Override
-//                public void run() {
-//                    if (!hasPendingFrame) {
-//                        return;
-//                    }
-//                    updateFrames++;
-//                    Log.e("Alan", "onSurfaceTextureUpdated in hasPendingFrame value is" + hasPendingFrame);
-//                    hasPendingFrame = false;
-//                    if (callback != null) {
-//                        Log.e("Alan", "has callback");
-//                        handler.post(new Runnable() {
-//                            @Override
-//                            public void run() {
-//                                synchronized (GLESView.class) {
-//                                    callback.run();
-//                                }
-//                            }
-//                        });
-//                    }
-//                    Log.e("Alan", "onSurfaceTextureUpdated call finish hasPendingFrame  value is" + hasPendingFrame);
-//                }
-//            });
-//
-//        }
-    }
-
-    public static String getCurrentTimeStamp() {
-        SimpleDateFormat sdfDate = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");//dd/MM/yyyy
-        Date now = new Date();
-        String strDate = sdfDate.format(now);
-        return strDate;
-    }
-
+    return result;
+  }
 }

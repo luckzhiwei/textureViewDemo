@@ -3,7 +3,7 @@ package com.opengl.learn.openglview;
 import android.content.Context;
 import android.opengl.GLSurfaceView;
 
-import com.opengl.learn.openglview.base.SimpleTriangle;
+import com.opengl.learn.openglview.base.SimpleScissor;
 
 import javax.microedition.khronos.egl.EGLConfig;
 import javax.microedition.khronos.opengles.GL10;
@@ -19,7 +19,7 @@ public class GLRender implements GLSurfaceView.Renderer {
 
     @Override
     public void onSurfaceCreated(GL10 gl10, EGLConfig eglConfig) {
-        renderer = new SimpleTriangle(this.mContext);
+        renderer = new SimpleScissor();
         renderer.setWidth(1000);
         renderer.setHeight(1000);
         renderer.onSurfaceCreated();
